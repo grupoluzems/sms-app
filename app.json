@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "sms-app",
+    "slug": "sms-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "platforms": [
+      "android"
+    ],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "br.com.grupoluzems.smsapp",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "android.permission.SEND_SMS",
+        "android.permission.READ_SMS"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "sms-app"
+      }
+    },
+    "cli": {
+      "appVersionSource": "appstore"
+    },
+    "ios": {
+      "bundleIdentifier": "br.com.grupoluzems.smsapp"
+    }
+  }
+}
