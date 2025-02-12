@@ -1,119 +1,202 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, RefreshControl } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, RefreshControl, Button, NativeModules } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import * as SMS from 'expo-sms';
 import axios from 'axios';
+import { TextInput } from 'react-native';
 
-interface PendingSMS {
-  id: string;
+interface ISMS {
+  id: number;
   phone: string;
   message: string;
   status: string;
+  error: string;
 }
 
 export default function App() {
-  const [isConnected, setIsConnected] = useState<boolean>(true);
-  const [pendingSMS, setPendingSMS] = useState<PendingSMS[]>([]);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [pendingSMS, setPendingSMS] = useState<ISMS[]>([]);
   const [status, setStatus] = useState<string>('');
-
-  const API_URL = 'http://192.168.16.164:3000';
+  const [isFetching, setIsFetching] = useState<boolean>(false);
+  const [baseUrl, setBaseUrl] = useState<string>('');
+  const [token, setToken] = useState<string>('');
+  
+  const { DirectSmsModule } = NativeModules;
 
   useEffect(() => {
-    setupNetworkListener();
-    fetchPendingSMS();
-
-    const interval = setInterval(() => {
-      if (isConnected) {
-        fetchPendingSMS();
-        processPendingSMS();
+    // Se o fetching estiver ativado, configure o intervalo
+    let interval: NodeJS.Timeout | null = null;
+  
+    if (isFetching || (!pendingSMS && pendingSMS.length == 0)) {
+      interval = setInterval(async () => {
+        const data = await fetchPendingSMS();
+        await processPendingSMS(data);
+      }, 5000);
+    } else {
+      // Se o fetching estiver desativado, limpe o intervalo
+      if (interval) {
+        clearInterval(interval);
       }
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [isConnected]);
-
-  const setupNetworkListener = () => {
-    NetInfo.addEventListener(state => {
-      setIsConnected(state.isConnected ?? false);
-    });
-  };
+    }
+  
+    // Limpeza do intervalo quando o componente desmontar ou quando `isFetching` mudar
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isFetching, pendingSMS]);
 
   const fetchPendingSMS = async () => {
     try {
-      const response = await axios.get(`${API_URL}/sms?status=PENDING`);
+
+      setStatus("");
+
+      if (!isFetching) {
+        setStatus("Busca pausada");
+        return [];
+      }
+
+      if (!baseUrl || !token) {
+        setStatus("Base URL ou Token inválidos");
+        return [];
+      }
+
+      setStatus("Buscando dados");
+      const response = await axios.get(baseUrl, { headers: { Authorization: token } });
       setPendingSMS(response.data);
+      return response.data;
     } catch (error) {
-      setStatus('Error fetching pending SMS');
-      console.error(error);
+      setStatus('Erro ao buscar SMSs ' + error);
     }
   };
 
-  const confirmSMSSent = async (sms: PendingSMS) => {
+  const toggleFetching = () => {
+    setIsFetching(!isFetching);
+    setStatus("");
+  };
+
+  const confirmSMSSent = async (sms: ISMS) => {
     try {
-      sms.status = 'SENDED';
-      await axios.put(`${API_URL}/sms/` + sms.id, { sms });
+      sms.status = 'SENT';
+      await axios.put(`${baseUrl}/${sms.id}`, sms, { headers: { Authorization: token } });
     } catch (error) {
-      console.error('Error confirming SMS:', error);
+      setStatus('Erro na confirmação do SMS')
     }
   };
 
-  const sendSMS = async (sms: PendingSMS) => {
+  const errorSMSSent = async (sms: ISMS, err: string) => {
     try {
-      const isAvailable = await SMS.isAvailableAsync();
-      if (!isAvailable) {
-        setStatus('SMS is not available on this device. Please ensure SMS functionality is enabled.');
+      sms.status = 'ERROR';
+      sms.error = err;
+      await axios.put(`${baseUrl}/${sms.id}`, sms, { headers: { Authorization: token } });
+    } catch (error) {
+      setStatus('Erro na confirmação do SMS')
+    }
+  };
+
+  const sendSMS = async (sms: ISMS) => {
+    try {
+      setStatus(`Enviando SMS para ${sms.phone}`);
+      
+      if (!DirectSmsModule) {
+        await errorSMSSent(sms, 'Módulo SMS não disponível');
         return;
       }
 
-      setStatus('Attempting to send SMS...');
-      const { result } = await SMS.sendSMSAsync([sms.phone], sms.message);
+      const result = await DirectSmsModule.sendSms(sms.phone, sms.message);
       
       if (result === 'sent') {
-        setStatus('SMS sent successfully!');
+        setStatus(`SMS enviado com sucesso para ${sms.phone}!`);
         await confirmSMSSent(sms);
-        setPendingSMS(current => current.filter(item => item.id !== sms.id));
-      } else if (result === 'cancelled') {
-        setStatus('SMS sending was cancelled by the user');
+        setPendingSMS(current => current.filter(item => item.status == 'PENDING'));
+        return;
+      } 
+      
+      if (result === 'permission_granted') {
+        
+        const secondAttempt = await DirectSmsModule.sendSms(sms.phone, sms.message);
+        
+        if (secondAttempt === 'sent') {
+          setStatus(`SMS enviado para ${sms.phone} depois da permissão habilitada!`);
+          await confirmSMSSent(sms);
+          setPendingSMS(current => current.filter(item => item.id !== sms.id));
+          return;
+        } 
+        
+        await errorSMSSent(sms, `Falha ao enviar SSM após permissão habilitada: ${secondAttempt}`);
+        
       } else {
-        setStatus(`SMS sending resulted in unexpected status: ${result}`);
+        await errorSMSSent(sms, `Erro: ${result}`);
       }
+
     } catch (error: any) {
-      console.error('Error sending SMS:', error);
-      const errorMessage = error?.message || 'Unknown error occurred';
-      setStatus(`Error sending SMS: ${errorMessage}. Please ensure the app has SMS permissions.`);
+      const errorMessage = error?.message || 'Erro desconhecido';
+      await errorSMSSent(sms, errorMessage);
+      setStatus(`Falha no envio do SMS para ${sms.phone}: ${errorMessage}`);
     }
   };
 
-  const processPendingSMS = async () => {
-    for (const sms of pendingSMS) {
+  const processPendingSMS = async (data: ISMS[]) => {
+    for (const sms of data) {
       await sendSMS(sms);
+      await sleep(1000);
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchPendingSMS();
-    setRefreshing(false);
-  };
+  const sleep = (ms: number) => {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
   return (
     <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
       >
-        <Text style={styles.title}>SMS Manager</Text>
-        <Text style={styles.status}>{status}</Text>
-        <Text style={styles.count}>
-          Pending SMS: {pendingSMS.length}
+        <Text style={styles.title}>Disparador de SMS's</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Base URL"
+          value={baseUrl}
+          onChangeText={setBaseUrl}
+          multiline={true}
+          editable={!isFetching}
+        />
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Token"
+          value={token}
+          onChangeText={setToken}
+          multiline={true}
+          editable={!isFetching}
+        />
+        
+        <Text>
+        { isFetching }
         </Text>
+
+        <Button
+          onPress={toggleFetching}
+          title={isFetching ? "Pausar" : "Iniciar"}
+          color={isFetching ? 'red' : 'green'} 
+          disabled={!baseUrl || !token}
+        />
+
+        <Text style={styles.status}>{status}</Text>
+
+        <Text style={styles.count}>
+          SMS's pendentes: {pendingSMS.length}
+        </Text>
+
         {pendingSMS.map(sms => (
           <View key={sms.id} style={styles.smsItem}>
-            <Text>To: {sms.phone}</Text>
-            <Text>Message: {sms.message}</Text>
+            <Text style={{ marginBottom: 5 }}>Telefone: {sms.phone}</Text>
+            <Text style={{ marginBottom: 5 }}>Mensagem: {sms.message}</Text>
+            <Button
+              onPress={() => sendSMS(sms)}
+              title="Enviar"
+              color="gray"
+            />
           </View>
         ))}
       </ScrollView>
@@ -130,14 +213,23 @@ const styles = StyleSheet.create({
   scrollView: {
     padding: 20
   },
+  input: {
+    borderBottomWidth: 1,
+    borderColor: '#CCC',
+    marginBottom: 8,
+    flex: 1,
+    flexWrap: 'wrap'
+  },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 20
+    marginBottom: 10,
+    textAlign: 'center'
   },
   status: {
     color: 'red',
-    marginBottom: 10
+    marginBottom: 10,
+    textAlign: 'right'
   },
   count: {
     fontSize: 18,
@@ -150,4 +242,4 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginBottom: 10
   }
-});
+})

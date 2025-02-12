@@ -25,20 +25,21 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
-        "android.permission.SEND_SMS",
-        "android.permission.READ_SMS"
-      ]
+        "SEND_SMS",
+        "READ_SMS",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "INTERNET"
+      ],
+      "usesCleartextTraffic": true 
     },
     "extra": {
       "eas": {
-        "projectId": "sms-app"
+        "projectId": "2e492e09-43d0-4ee5-aa26-0c5cbe4f705a"
       }
     },
     "cli": {
       "appVersionSource": "appstore"
-    },
-    "ios": {
-      "bundleIdentifier": "br.com.grupoluzems.smsapp"
     }
   }
 }
