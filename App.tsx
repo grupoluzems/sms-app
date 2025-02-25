@@ -74,6 +74,11 @@ export default function App() {
     setStatus("");
   };
 
+  const sleep = (min: number, max: number) => {
+    const randomDelay = Math.floor(Math.random() * (max - min + 1)) + min;
+    return new Promise(resolve => setTimeout(resolve, randomDelay));
+  };
+
   const confirmSMSSent = async (sms: ISMS) => {
     try {
       sms.status = 'SENT';
@@ -138,13 +143,9 @@ export default function App() {
   const processPendingSMS = async (data: ISMS[]) => {
     for (const sms of data) {
       await sendSMS(sms);
-      await sleep(1000);
+      await sleep(1000, 4000);
     }
   };
-
-  const sleep = (ms: number) => {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 
   return (
     <View style={styles.container}>
